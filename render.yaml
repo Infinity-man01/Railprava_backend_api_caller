@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: priority-engine-api
+    env: docker
+    region: frankfurt # You can change this if you prefer a different region
+    plan: free
+    branch: main
