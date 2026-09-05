@@ -1,8 +1,8 @@
 import os
 import xgboost as xgb
 import pandas as pd
-from typing import Dict, Any
-from .models import AssetFeatures
+from typing import Dict, Any, List
+from .models import AssetFeatures, ActionPlan, PriorityResponse
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,74 +32,136 @@ EXPECTED_FEATURES = [
 def preprocess_features(data: AssetFeatures) -> pd.DataFrame:
     """
     Convert Pydantic model into a DataFrame with one-hot encoded categorical variables.
-    Matches the EXPECTED_FEATURES order.
     """
-    # Initialize dictionary with zeros for all expected features
-    feature_dict = {feat: 0.0 for feat in EXPECTED_FEATURES}
-    
-    # Fill in continuous features
-    for field in data.model_fields.keys():
-        if field in feature_dict:
-            feature_dict[field] = getattr(data, field)
+    return preprocess_batch_features([data])
+
+def preprocess_batch_features(data_list: List[AssetFeatures]) -> pd.DataFrame:
+    """
+    Convert a list of Pydantic models into a DataFrame.
+    """
+    dict_list = []
+    for data in data_list:
+        feature_dict = {feat: 0.0 for feat in EXPECTED_FEATURES}
+        for field in data.model_fields.keys():
+            if field in feature_dict:
+                feature_dict[field] = getattr(data, field)
+        
+        # Categorical
+        asset_col = f"asset_type__{data.asset_type}"
+        if asset_col in feature_dict: feature_dict[asset_col] = 1.0
             
-    # Set one-hot encoded categorical features to 1
-    asset_col = f"asset_type__{data.asset_type}"
-    if asset_col in feature_dict:
-        feature_dict[asset_col] = 1.0
+        section_col = f"section_type__{data.section_type}"
+        if section_col in feature_dict: feature_dict[section_col] = 1.0
+            
+        zone_col = f"zone__{data.zone}"
+        if zone_col in feature_dict: feature_dict[zone_col] = 1.0
+            
+        dict_list.append(feature_dict)
         
-    section_col = f"section_type__{data.section_type}"
-    if section_col in feature_dict:
-        feature_dict[section_col] = 1.0
-        
-    zone_col = f"zone__{data.zone}"
-    if zone_col in feature_dict:
-        feature_dict[zone_col] = 1.0
-        
-    df = pd.DataFrame([feature_dict])
-    # Ensure correct column order
+    df = pd.DataFrame(dict_list)
     return df[EXPECTED_FEATURES]
 
-def predict_failure_probability(df: pd.DataFrame) -> float:
-    # predict_proba returns array of shape (n_samples, n_classes)
-    proba = classifier.predict_proba(df)[0][1] # Probability of positive class (failure)
-    return float(proba)
+def predict_failure_probability_batch(df: pd.DataFrame) -> List[float]:
+    probas = classifier.predict_proba(df)[:, 1]
+    return [float(p) for p in probas]
 
-def predict_risk_score(df: pd.DataFrame) -> float:
-    risk = regressor.predict(df)[0]
-    # Assuming risk is normalized or can be bounded
-    return float(max(0.0, risk))
+def predict_risk_score_batch(df: pd.DataFrame) -> List[float]:
+    risks = regressor.predict(df)
+    return [float(max(0.0, r)) for r in risks]
 
-def generate_recommendation(priority: float, fail_prob: float, risk: float) -> str:
-    """Generate a human readable recommendation based on scores."""
+def generate_action_plan(priority: float, asset_type: str) -> ActionPlan:
+    """Generate structured AI recommendations."""
     if priority >= 80:
-        return "CRITICAL: Immediate maintenance required. High risk of failure and severe impact."
+        urgency = "Critical"
+        if asset_type == "Track":
+            action = "Immediate Ultrasonic Flaw Detection and Track Replacement."
+            team = "Emergency Track Crew"
+        elif asset_type == "Bridge":
+            action = "Urgent Structural Integrity Check and Load Restriction."
+            team = "Bridge Engineering Unit"
+        else:
+            action = "Immediate Replacement or Overhaul."
+            team = "Specialized Maintenance Unit"
     elif priority >= 50:
-        return "HIGH: Schedule block at the earliest availability. Asset showing signs of degradation."
+        urgency = "High"
+        action = "Schedule maintenance block in the upcoming week for detailed inspection."
+        team = "Routine Maintenance Crew"
     elif priority >= 30:
-        return "MEDIUM: Monitor closely. Plan for routine maintenance in the upcoming schedule."
+        urgency = "Medium"
+        action = "Monitor condition. Add to routine monthly check."
+        team = "Local Inspection Team"
     else:
-        return "LOW: Asset is in good condition. Standard periodic inspection applies."
+        urgency = "Low"
+        action = "No immediate action required. Standard periodic inspection."
+        team = "Standard Patrol"
+        
+    return ActionPlan(
+        urgency_level=urgency,
+        recommended_action=action,
+        suggested_team=team
+    )
 
-def calculate_priority_pipeline(data: AssetFeatures) -> Dict[str, Any]:
-    df = preprocess_features(data)
+def get_top_risk_factors(data: AssetFeatures) -> List[str]:
+    """Heuristic logic to explain the AI model's decision."""
+    factors = []
+    if data.overdue_ratio > 1.0:
+        factors.append(f"Severely overdue for inspection (Ratio: {data.overdue_ratio})")
+    elif data.last_inspection_days_ago > 180:
+        factors.append("No inspection in the last 6 months")
+        
+    if data.condition_rating >= 4.0:
+        factors.append("Poor visual condition rating")
+        
+    if data.historical_failures_last_2yrs >= 3:
+        factors.append("High history of recent failures")
+        
+    if data.age_years > 30 and data.asset_type in ["Bridge", "Track"]:
+        factors.append("Asset has exceeded standard lifecycle age")
+        
+    if data.corrosion_index > 0.7:
+        factors.append("Critical corrosion levels detected")
+        
+    if data.weather_exposure_index > 0.8:
+        factors.append("High environmental stress exposure")
+        
+    if not factors:
+        factors.append("No severe anomalies detected.")
+        
+    return factors
+
+def calculate_priority_pipeline(data: AssetFeatures) -> PriorityResponse:
+    results = batch_calculate_priority_pipeline([data])
+    return results[0]
+
+def batch_calculate_priority_pipeline(data_list: List[AssetFeatures]) -> List[PriorityResponse]:
+    if not data_list:
+        return []
+        
+    df = preprocess_batch_features(data_list)
     
-    fail_prob = predict_failure_probability(df)
-    risk_score = predict_risk_score(df)
+    fail_probs = predict_failure_probability_batch(df)
+    risk_scores = predict_risk_score_batch(df)
     
-    # Simple weighted formula for Priority Score out of 100
-    # Weights can be adjusted based on domain knowledge.
-    # Using 60% failure probability and 40% risk score
-    # Assuming risk score is naturally between 0 and 1, if not, it should be normalized.
-    # From metrics, RMSE is ~0.06 on risk, so risk is likely between 0 and 1.
-    priority_score = (fail_prob * 60.0) + (risk_score * 40.0)
-    # Ensure it's capped at 100
-    priority_score = min(100.0, max(0.0, priority_score))
-    
-    recommendation = generate_recommendation(priority_score, fail_prob, risk_score)
-    
-    return {
-        "risk_score": risk_score,
-        "failure_probability": fail_prob,
-        "priority_score": priority_score,
-        "recommendation": recommendation
-    }
+    responses = []
+    for i, data in enumerate(data_list):
+        f_prob = fail_probs[i]
+        r_score = risk_scores[i]
+        
+        # Formula: 60% failure, 40% risk
+        p_score = (f_prob * 60.0) + (r_score * 40.0)
+        p_score = min(100.0, max(0.0, p_score))
+        
+        action_plan = generate_action_plan(p_score, data.asset_type)
+        risk_factors = get_top_risk_factors(data)
+        
+        resp = PriorityResponse(
+            asset_id=data.asset_id,
+            risk_score=r_score,
+            failure_probability=f_prob,
+            priority_score=p_score,
+            action_plan=action_plan,
+            top_risk_factors=risk_factors
+        )
+        responses.append(resp)
+        
+    return responses

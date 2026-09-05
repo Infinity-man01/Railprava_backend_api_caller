@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Priority Engine Tester</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent: #38bdf8;
+            --accent-hover: #0284c7;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+
+        h1 {
+            font-weight: 800;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.2rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input, select {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            color: white;
+            padding: 0.8rem 1rem;
+            border-radius: 12px;
+            font-family: inherit;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+        }
+
+        select option {
+            background: #1e293b;
+            color: white;
+        }
+
+        button {
+            grid-column: 1 / -1;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1rem;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+            font-family: inherit;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(2, 132, 199, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* Results Panel */
+        .results-panel {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .result-card {
+            background: rgba(0,0,0,0.3);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--glass-border);
+            transform: scale(0.95);
+            opacity: 0;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .result-card.active {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        .result-title {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .result-value {
+            font-size: 3rem;
+            font-weight: 800;
+        }
+
+        .score-high { color: var(--danger); }
+        .score-med { color: var(--warning); }
+        .score-low { color: var(--success); }
+
+        .recommendation {
+            font-size: 1.2rem;
+            line-height: 1.6;
+            border-left: 4px solid var(--accent);
+            padding-left: 1rem;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: none;
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Input Form -->
+        <div class="glass-panel">
+            <h1>Priority Engine</h1>
+            <p class="subtitle">AI-driven asset maintenance predictions</p>
+            
+            <form id="predictForm" class="form-grid">
+                
+                <div class="input-group">
+                    <label>Asset Type</label>
+                    <select id="asset_type" required>
+                        <option value="Track">Track</option>
+                        <option value="Bridge">Bridge</option>
+                        <option value="Signal">Signal</option>
+                        <option value="OHE">OHE</option>
+                        <option value="Points_and_Crossing">Points & Crossing</option>
+                        <option value="Level_Crossing">Level Crossing</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Section Type</label>
+                    <select id="section_type" required>
+                        <option value="Main_Line">Main Line</option>
+                        <option value="Branch_Line">Branch Line</option>
+                        <option value="Siding">Siding</option>
+                        <option value="Yard">Yard</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Zone</label>
+                    <select id="zone" required>
+                        <option value="Northern">Northern</option>
+                        <option value="Southern">Southern</option>
+                        <option value="Eastern">Eastern</option>
+                        <option value="Western">Western</option>
+                        <option value="Central">Central</option>
+                        <option value="NorthEastern">NorthEastern</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Age (Years)</label>
+                    <input type="number" id="age_years" value="15.5" step="0.1" required>
+                </div>
+
+                <div class="input-group">
+                    <label>Last Inspection (Days)</label>
+                    <input type="number" id="last_inspection_days_ago" value="120" required>
+                </div>
+
+                <div class="input-group">
+                    <label>Overdue Ratio</label>
+                    <input type="number" id="overdue_ratio" value="0.2" step="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label>Traffic (Trains/Day)</label>
+                    <input type="number" id="traffic_density_trains_per_day" value="85" required>
+                </div>
+
+                <div class="input-group">
+                    <label>Condition Rating (1-5)</label>
+                    <input type="number" id="condition_rating" value="4.5" step="0.1" required>
+                </div>
+
+                <button type="submit" id="submitBtn">
+                    <span id="btnText">Calculate Priority</span>
+                    <div id="loadingSpinner" class="spinner"></div>
+                </button>
+            </form>
+        </div>
+
+        <!-- Results Panel -->
+        <div class="glass-panel results-panel">
+            <h2 style="margin-bottom: 2rem; color: white;">Analysis Results</h2>
+            
+            <div class="result-card" id="priorityCard">
+                <div class="result-title">Overall Priority Score</div>
+                <div class="result-value" id="priorityValue">--</div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="result-card" id="riskCard">
+                    <div class="result-title">Risk Score</div>
+                    <div class="result-value" id="riskValue" style="font-size: 2rem;">--</div>
+                </div>
+
+                <div class="result-card" id="failureCard">
+                    <div class="result-title">Failure Probability</div>
+                    <div class="result-value" id="failureValue" style="font-size: 2rem;">--</div>
+                </div>
+            </div>
+
+            <div class="result-card" id="recCard">
+                <div class="result-title">AI Recommendation</div>
+                <div class="recommendation" id="recValue">Waiting for input...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use the live render URL here!
+        const API_URL = "https://priority-engine-api.onrender.com/api/v1/priority";
+
+        document.getElementById('predictForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // UI State
+            const btn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const spinner = document.getElementById('loadingSpinner');
+            
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'block';
+
+            // Reset cards
+            document.querySelectorAll('.result-card').forEach(c => c.classList.remove('active'));
+
+            // Gather Data
+            // We use default hidden values for fields not on the form to keep it simple
+            const payload = {
+                asset_type: document.getElementById('asset_type').value,
+                section_type: document.getElementById('section_type').value,
+                zone: document.getElementById('zone').value,
+                age_years: parseFloat(document.getElementById('age_years').value),
+                last_inspection_days_ago: parseFloat(document.getElementById('last_inspection_days_ago').value),
+                overdue_ratio: parseFloat(document.getElementById('overdue_ratio').value),
+                traffic_density_trains_per_day: parseFloat(document.getElementById('traffic_density_trains_per_day').value),
+                max_speed_kmph: 130.0,
+                load_tonnage_daily: 50000.0,
+                weather_exposure_index: 0.8,
+                temperature_extremity_index: 0.6,
+                gradient_curvature_index: 0.3,
+                condition_rating: parseFloat(document.getElementById('condition_rating').value),
+                corrosion_index: 0.4,
+                historical_failures_last_2yrs: 2.0,
+                avg_repair_time_hours: 6.5,
+                distance_from_depot_km: 45.0,
+                redundancy_available: 1.0
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+
+                if(!response.ok) throw new Error(data.detail || 'API Error');
+
+                // Update UI
+                const pValue = document.getElementById('priorityValue');
+                pValue.innerText = data.priority_score.toFixed(1);
+                
+                // Set color based on score
+                pValue.className = 'result-value ' + 
+                    (data.priority_score >= 80 ? 'score-high' : 
+                     data.priority_score >= 50 ? 'score-med' : 'score-low');
+
+                document.getElementById('riskValue').innerText = data.risk_score.toFixed(3);
+                document.getElementById('failureValue').innerText = (data.failure_probability * 100).toFixed(1) + '%';
+                
+                const recValue = document.getElementById('recValue');
+                recValue.innerText = data.recommendation;
+                
+                // Update recommendation border color
+                if(data.recommendation.includes('CRITICAL')) recValue.style.borderLeftColor = 'var(--danger)';
+                else if(data.recommendation.includes('HIGH')) recValue.style.borderLeftColor = 'var(--warning)';
+                else if(data.recommendation.includes('MEDIUM')) recValue.style.borderLeftColor = '#fbbf24';
+                else recValue.style.borderLeftColor = 'var(--success)';
+
+                // Animate in
+                setTimeout(() => {
+                    document.querySelectorAll('.result-card').forEach((c, i) => {
+                        setTimeout(() => c.classList.add('active'), i * 150);
+                    });
+                }, 100);
+
+            } catch (error) {
+                alert("Error connecting to API: " + error.message);
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
