@@ -2,6 +2,8 @@ import sqlite3
 import os
 import json
 import time
+import re
+import urllib.parse
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 from dotenv import load_dotenv
@@ -18,6 +20,19 @@ DB_PATH = os.path.join(BASE_DIR, 'predictions.db')
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+def sanitize_db_url(url: str) -> str:
+    """Safely URL-encode passwords containing special characters (like '@' or '!') in PostgreSQL connection strings."""
+    if not url:
+        return url
+    pattern = r'^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^@]+)$'
+    m = re.match(pattern, url)
+    if m:
+        scheme, user, password, rest = m.groups()
+        password = urllib.parse.unquote(password)
+        encoded_password = urllib.parse.quote(password, safe='')
+        return f"{scheme}{user}:{encoded_password}@{rest}"
+    return url
+
 _pg_pool: Optional[pool.ThreadedConnectionPool] = None
 
 def get_pg_pool() -> pool.ThreadedConnectionPool:
@@ -30,7 +45,7 @@ def get_pg_pool() -> pool.ThreadedConnectionPool:
         _pg_pool = pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=10,
-            dsn=url
+            dsn=sanitize_db_url(url)
         )
     return _pg_pool
 

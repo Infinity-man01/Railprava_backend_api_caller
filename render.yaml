@@ -5,3 +5,6 @@ services:
     region: frankfurt # You can change this if you prefer a different region
     plan: free
     branch: main
+    envVars:
+      - key: DATABASE_URL
+        sync: false
