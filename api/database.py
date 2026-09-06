@@ -24,14 +24,15 @@ def sanitize_db_url(url: str) -> str:
     """Safely URL-encode passwords containing special characters (like '@' or '!') in PostgreSQL connection strings."""
     if not url:
         return url
+    url = url.strip()
     pattern = r'^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^@]+)$'
     m = re.match(pattern, url)
     if m:
         scheme, user, password, rest = m.groups()
-        password = urllib.parse.unquote(password)
+        password = urllib.parse.unquote(password.strip())
         encoded_password = urllib.parse.quote(password, safe='')
-        return f"{scheme}{user}:{encoded_password}@{rest}"
-    return url
+        return f"{scheme}{user.strip()}:{encoded_password}@{rest.strip()}".strip()
+    return url.strip()
 
 _pg_pool: Optional[pool.ThreadedConnectionPool] = None
 
@@ -39,7 +40,7 @@ def get_pg_pool() -> pool.ThreadedConnectionPool:
     """Initialize or return the global ThreadedConnectionPool."""
     global _pg_pool
     if _pg_pool is None or _pg_pool.closed:
-        url = os.getenv("DATABASE_URL") or DATABASE_URL
+        url = (os.getenv("DATABASE_URL") or DATABASE_URL or "").strip()
         if not url:
             raise ValueError("DATABASE_URL environment variable is not configured.")
         _pg_pool = pool.ThreadedConnectionPool(
