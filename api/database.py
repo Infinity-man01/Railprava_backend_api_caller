@@ -1,16 +1,153 @@
 import sqlite3
 import os
 import json
-from typing import List, Dict, Any
+import time
+from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
+from dotenv import load_dotenv
+import psycopg2
+from psycopg2 import pool
+from psycopg2.extras import RealDictCursor
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, 'predictions.db')
 
+# -------------------------------------------------------------
+# 1. PostgreSQL (Supabase) Connection Layer
+# -------------------------------------------------------------
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+_pg_pool: Optional[pool.ThreadedConnectionPool] = None
+
+def get_pg_pool() -> pool.ThreadedConnectionPool:
+    """Initialize or return the global ThreadedConnectionPool."""
+    global _pg_pool
+    if _pg_pool is None or _pg_pool.closed:
+        url = os.getenv("DATABASE_URL") or DATABASE_URL
+        if not url:
+            raise ValueError("DATABASE_URL environment variable is not configured.")
+        _pg_pool = pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=url
+        )
+    return _pg_pool
+
+@contextmanager
+def get_db_connection():
+    """Context manager for acquiring and releasing pooled PostgreSQL connections."""
+    p = get_pg_pool()
+    conn = p.getconn()
+    try:
+        yield conn
+    finally:
+        p.putconn(conn)
+
+def check_db_health() -> Dict[str, Any]:
+    """Check live database connectivity and latency."""
+    try:
+        t0 = time.time()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+                cur.fetchone()
+                cur.execute("SELECT COUNT(*) FROM railway_assets;")
+                asset_count = cur.fetchone()[0]
+        latency_ms = round((time.time() - t0) * 1000, 2)
+        return {
+            "status": "connected",
+            "latency_ms": latency_ms,
+            "asset_count": asset_count,
+            "engine": "PostgreSQL (Supabase)"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "detail": str(e)
+        }
+
+def get_asset_by_id(asset_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch an asset by its asset_id from PostgreSQL."""
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT 
+                    asset_id, asset_type, section_type, zone, age_years,
+                    last_inspection_days_ago, overdue_ratio, traffic_density_trains_per_day,
+                    max_speed_kmph, load_tonnage_daily, weather_exposure_index,
+                    temperature_extremity_index, gradient_curvature_index, condition_rating,
+                    corrosion_index, historical_failures_last_2yrs, avg_repair_time_hours,
+                    redundancy_available, distance_from_depot_km, risk_score,
+                    failure_within_30_days, created_at
+                FROM railway_assets
+                WHERE asset_id = %s;
+            """, (asset_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+def get_assets_batch(asset_ids: List[str]) -> List[Dict[str, Any]]:
+    """Fetch multiple assets by IDs in a single query."""
+    if not asset_ids:
+        return []
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT 
+                    asset_id, asset_type, section_type, zone, age_years,
+                    last_inspection_days_ago, overdue_ratio, traffic_density_trains_per_day,
+                    max_speed_kmph, load_tonnage_daily, weather_exposure_index,
+                    temperature_extremity_index, gradient_curvature_index, condition_rating,
+                    corrosion_index, historical_failures_last_2yrs, avg_repair_time_hours,
+                    redundancy_available, distance_from_depot_km, risk_score,
+                    failure_within_30_days, created_at
+                FROM railway_assets
+                WHERE asset_id = ANY(%s);
+            """, (asset_ids,))
+            return [dict(r) for r in cur.fetchall()]
+
+def list_assets(
+    limit: int = 50, 
+    offset: int = 0, 
+    asset_type: Optional[str] = None, 
+    zone: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """List assets from PostgreSQL with optional filtering."""
+    query = """
+        SELECT 
+            asset_id, asset_type, section_type, zone, age_years,
+            last_inspection_days_ago, overdue_ratio, traffic_density_trains_per_day,
+            max_speed_kmph, load_tonnage_daily, weather_exposure_index,
+            temperature_extremity_index, gradient_curvature_index, condition_rating,
+            corrosion_index, historical_failures_last_2yrs, avg_repair_time_hours,
+            redundancy_available, distance_from_depot_km, risk_score,
+            failure_within_30_days, created_at
+        FROM railway_assets
+        WHERE 1=1
+    """
+    params = []
+    if asset_type:
+        query += " AND asset_type = %s"
+        params.append(asset_type)
+    if zone:
+        query += " AND zone = %s"
+        params.append(zone)
+    query += " ORDER BY asset_id ASC LIMIT %s OFFSET %s;"
+    params.extend([limit, offset])
+    
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, tuple(params))
+            return [dict(r) for r in cur.fetchall()]
+
+# -------------------------------------------------------------
+# 2. SQLite Telemetry Logging (Preserved for prediction telemetry)
+# -------------------------------------------------------------
 def init_db():
     """Initialize the SQLite database for telemetry logging."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -21,7 +158,7 @@ def init_db():
             risk_factors TEXT,
             input_features TEXT
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 
@@ -29,10 +166,10 @@ def log_prediction(asset_id: str, asset_type: str, priority_score: float, urgenc
     """Log a single prediction to the database."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    cursor.execute("""
         INSERT INTO predictions (asset_id, asset_type, priority_score, urgency_level, risk_factors, input_features)
         VALUES (?, ?, ?, ?, ?, ?)
-    ''', (
+    """, (
         asset_id,
         asset_type,
         priority_score,
@@ -60,10 +197,10 @@ def log_batch_predictions(results: List[Any], inputs: List[Any]):
             inp.model_dump_json()
         ))
         
-    cursor.executemany('''
+    cursor.executemany("""
         INSERT INTO predictions (asset_id, asset_type, priority_score, urgency_level, risk_factors, input_features)
         VALUES (?, ?, ?, ?, ?, ?)
-    ''', data)
+    """, data)
     conn.commit()
     conn.close()
 
@@ -90,5 +227,5 @@ def get_history(limit: int = 50) -> List[Dict[str, Any]]:
         })
     return history
 
-# Initialize on import
+# Initialize SQLite on import
 init_db()

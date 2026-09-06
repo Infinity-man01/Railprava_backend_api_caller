@@ -49,3 +49,7 @@ class RiskResponse(BaseModel):
 
 class FailureResponse(BaseModel):
     failure_probability: float
+
+
+class BatchLiveAssetRequest(BaseModel):
+    asset_ids: List[str] = Field(..., description="List of asset_ids to fetch live from PostgreSQL")

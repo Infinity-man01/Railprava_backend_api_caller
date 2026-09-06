@@ -1,7 +1,7 @@
 import os
 import xgboost as xgb
 import pandas as pd
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 from .models import AssetFeatures, ActionPlan, PriorityResponse
 
 # Paths
@@ -17,7 +17,7 @@ classifier.load_model(CLASSIFIER_PATH)
 regressor = xgb.XGBRegressor()
 regressor.load_model(REGRESSOR_PATH)
 
-# Feature list required by the model in exact order
+# Feature list required by the model in exact order (31 features)
 EXPECTED_FEATURES = [
     'age_years', 'last_inspection_days_ago', 'overdue_ratio', 'traffic_density_trains_per_day', 
     'max_speed_kmph', 'load_tonnage_daily', 'weather_exposure_index', 'temperature_extremity_index', 
@@ -29,6 +29,42 @@ EXPECTED_FEATURES = [
     'zone__Central', 'zone__Eastern', 'zone__NorthEastern', 'zone__Northern', 'zone__Southern', 'zone__Western'
 ]
 
+# Strictly the 19 live model input features
+INPUT_FEATURE_KEYS = [
+    'asset_id', 'asset_type', 'section_type', 'zone', 'age_years',
+    'last_inspection_days_ago', 'overdue_ratio', 'traffic_density_trains_per_day',
+    'max_speed_kmph', 'load_tonnage_daily', 'weather_exposure_index',
+    'temperature_extremity_index', 'gradient_curvature_index', 'condition_rating',
+    'corrosion_index', 'historical_failures_last_2yrs', 'avg_repair_time_hours',
+    'distance_from_depot_km', 'redundancy_available'
+]
+
+def db_record_to_asset_features(record: Dict[str, Any]) -> AssetFeatures:
+    """
+    Safely extract strictly the 19 live model input features from a database record.
+    Explicitly filters out ground-truth targets (risk_score, failure_within_30_days)
+    and metadata (created_at) to guarantee ZERO target leakage.
+    """
+    features = {k: record[k] for k in INPUT_FEATURE_KEYS if k in record}
+    # Ensure boolean redundancy_available is converted to float (1.0 or 0.0) for model input
+    if "redundancy_available" in features:
+        features["redundancy_available"] = 1.0 if features["redundancy_available"] else 0.0
+    return AssetFeatures(**features)
+
+def fetch_live_asset_features(asset_id: str) -> Optional[AssetFeatures]:
+    """Fetch an asset from PostgreSQL by ID and return validated AssetFeatures (19 inputs)."""
+    from .database import get_asset_by_id
+    record = get_asset_by_id(asset_id)
+    if not record:
+        return None
+    return db_record_to_asset_features(record)
+
+def fetch_live_assets_batch_features(asset_ids: List[str]) -> List[AssetFeatures]:
+    """Fetch multiple assets from PostgreSQL by IDs and return validated AssetFeatures list."""
+    from .database import get_assets_batch
+    records = get_assets_batch(asset_ids)
+    return [db_record_to_asset_features(r) for r in records]
+
 def preprocess_features(data: AssetFeatures) -> pd.DataFrame:
     """
     Convert Pydantic model into a DataFrame with one-hot encoded categorical variables.
@@ -37,7 +73,7 @@ def preprocess_features(data: AssetFeatures) -> pd.DataFrame:
 
 def preprocess_batch_features(data_list: List[AssetFeatures]) -> pd.DataFrame:
     """
-    Convert a list of Pydantic models into a DataFrame.
+    Convert a list of Pydantic models into a DataFrame with 31 encoded features.
     """
     dict_list = []
     for data in data_list:
@@ -46,7 +82,7 @@ def preprocess_batch_features(data_list: List[AssetFeatures]) -> pd.DataFrame:
             if field in feature_dict:
                 feature_dict[field] = getattr(data, field)
         
-        # Categorical
+        # Categorical one-hot encoding
         asset_col = f"asset_type__{data.asset_type}"
         if asset_col in feature_dict: feature_dict[asset_col] = 1.0
             
